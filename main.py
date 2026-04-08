@@ -30,7 +30,7 @@ def mesajlari_kontrol_et(ilk_yukleme=False):
         "Cookie": f"PHPSESSID={PHPSESSID}"
     }
     try:
-        r = requests.get("https://www.itemsatis.com/mesajlar", headers=headers, timeout=15)
+        r = requests.get("https://www.itemsatis.com/mesajlarim.html", headers=headers, timeout=15)
         
         if "giris" in r.url or "login" in r.url:
             print("Oturum süresi dolmuş!")
@@ -59,7 +59,7 @@ def mesajlari_kontrol_et(ilk_yukleme=False):
                 bildirim = (
                     f"📩 <b>Yeni Mesaj!</b>\n"
                     f"👤 Gönderen: {username}\n"
-                    f"🔗 <a href='https://www.itemsatis.com/mesajlar'>Mesajları Görüntüle</a>"
+                    f"🔗 <a href='https://www.itemsatis.com/mesajlarim.html'>Mesajları Görüntüle</a>"
                 )
                 telegram_bildirim_gonder(bildirim)
                 print(f"Yeni mesaj: {username}")
@@ -69,7 +69,7 @@ def mesajlari_kontrol_et(ilk_yukleme=False):
                 bildirim = (
                     f"📩 <b>Okunmamış Mesaj!</b>\n"
                     f"👤 Gönderen: {username}\n"
-                    f"🔗 <a href='https://www.itemsatis.com/mesajlar'>Mesajları Görüntüle</a>"
+                    f"🔗 <a href='https://www.itemsatis.com/mesajlarim.html'>Mesajları Görüntüle</a>"
                 )
                 telegram_bildirim_gonder(bildirim)
 
