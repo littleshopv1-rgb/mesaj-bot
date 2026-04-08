@@ -3,9 +3,8 @@ import time
 import requests
 import socketio
 import re
-from urllib.parse import quote
+import json
 
-# Ayarlar
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 TEMP_TOKEN = os.environ.get("TEMP_TOKEN")
@@ -32,13 +31,13 @@ def start_socket():
 
     @sio.event
     def connect():
-        print("Socket.io bağlantısı kuruldu!")
+        print("Bağlantı kuruldu!")
         send_telegram("✅ <b>Mesaj botu başlatıldı!</b>\nYeni mesajları takip ediyorum.")
         sio.emit("getMessageList")
 
     @sio.event
     def disconnect():
-        print("Bağlantı kesildi, yeniden bağlanılıyor...")
+        print("Bağlantı kesildi...")
 
     @sio.on("receiveMessageList")
     def on_receive_message_list(data):
@@ -46,16 +45,13 @@ def start_socket():
             print(f"receiveMessageList: {str(data)[:500]}")
             if not data or not isinstance(data, list):
                 return
-
             for chat in data:
                 chat_id = chat.get("chatID", "")
                 message = chat.get("Message", "") or chat.get("message", "")
-                sender = chat.get("senderName", "") or chat.get("receiverName", "") or "Bilinmeyen"
+                sender = chat.get("senderName", "") or "Bilinmeyen"
                 receiver_seen = chat.get("receiverSeen", True)
                 datetime_str = chat.get("Datetime", "") or chat.get("datetime", "")
-
                 msg_key = f"{chat_id}_{datetime_str}"
-
                 if msg_key not in seen_message_ids and not receiver_seen:
                     seen_message_ids.add(msg_key)
                     clean_msg = clean_html(message)
@@ -65,37 +61,35 @@ def start_socket():
                         f"📝 {clean_msg[:200]}"
                     )
                     send_telegram(text)
-                    print(f"Bildirim: {sender} - {clean_msg[:50]}")
+                    print(f"Bildirim gönderildi: {sender}")
         except Exception as e:
-            print(f"receiveMessageList hatası: {e}")
+            print(f"Hata: {e}")
 
     @sio.on("*")
     def catch_all(event, data):
         skip = ["ping", "pong", "connect", "disconnect"]
         if event not in skip:
-            print(f"EVENT: {event} | DATA: {str(data)[:400]}")
+            print(f"EVENT: {event} | DATA: {str(data)[:300]}")
 
     while True:
         try:
-            # userData'yı JSON string olarak encode et ve query param olarak gönder
-            encoded_token = quote(f'"{TEMP_TOKEN}"')
-            connect_url = f"{SOCKET_URL}?userData={encoded_token}"
-            
-            print(f"Bağlanılıyor: {SOCKET_URL}")
+            print("Bağlanılıyor...")
+            # userData'yı JSON string olarak gönder (tarayıcıda %22token%22 şeklinde)
             sio.connect(
-                connect_url,
+                SOCKET_URL,
                 transports=["websocket"],
-                wait_timeout=15
+                wait_timeout=15,
+                socketio_path="socket.io",
+                query={"userData": json.dumps(TEMP_TOKEN)}
             )
             sio.wait()
         except Exception as e:
             print(f"Bağlantı hatası: {e}")
-            print("5 saniye sonra tekrar deneniyor...")
             time.sleep(5)
 
 if __name__ == "__main__":
     print("Bot başlatılıyor...")
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID or not TEMP_TOKEN:
-        print("HATA: Gerekli environment variables eksik!")
+        print("HATA: Environment variables eksik!")
     else:
         start_socket()
