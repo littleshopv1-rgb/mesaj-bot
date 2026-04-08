@@ -1,17 +1,14 @@
 import requests
 import time
-import json
 import os
 from bs4 import BeautifulSoup
 
 # --- AYARLAR ---
-ITEMSATIS_USERNAME = os.environ.get("ITEMSATIS_USERNAME")
-ITEMSATIS_PASSWORD = os.environ.get("ITEMSATIS_PASSWORD")
+PHPSESSID = os.environ.get("PHPSESSID")
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 CHECK_INTERVAL = 60  # Her 60 saniyede bir kontrol eder
 
-# Daha önce görülen mesaj ID'lerini saklar
 seen_messages = set()
 
 def telegram_bildirim_gonder(mesaj):
@@ -22,83 +19,69 @@ def telegram_bildirim_gonder(mesaj):
         "parse_mode": "HTML"
     }
     try:
-        requests.post(url, data=data)
+        r = requests.post(url, data=data)
         print("Telegram bildirimi gönderildi.")
     except Exception as e:
         print(f"Telegram hatası: {e}")
 
-def itemsatis_giris_yap(session):
-    login_url = "https://www.itemsatis.com/giris"
-    payload = {
-        "username": ITEMSATIS_USERNAME,
-        "password": ITEMSATIS_PASSWORD,
-    }
-    headers = {
-        "User-Agent": "Mozilla/5.0",
-        "Referer": "https://www.itemsatis.com/giris"
-    }
-    r = session.post(login_url, data=payload, headers=headers)
-    if "hesabim" in r.url or r.status_code == 200:
-        print("Giriş başarılı.")
-        return True
-    print("Giriş başarısız!")
-    return False
-
-def mesajlari_kontrol_et(session):
+def mesajlari_kontrol_et():
     global seen_messages
-    mesaj_url = "https://www.itemsatis.com/mesajlar"
-    headers = {"User-Agent": "Mozilla/5.0"}
-    r = session.get(mesaj_url, headers=headers)
-    soup = BeautifulSoup(r.text, "html.parser")
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Cookie": f"PHPSESSID={PHPSESSID}"
+    }
+    try:
+        r = requests.get("https://www.itemsatis.com/mesajlar", headers=headers, timeout=15)
+        soup = BeautifulSoup(r.text, "html.parser")
 
-    # Mesaj listesini bul (itemsatis.com yapısına göre ayarlandı)
-    mesaj_satirlari = soup.select(".message-item, .msg-row, .conversation-item")
+        if "giris" in r.url or "login" in r.url:
+            print("Oturum süresi dolmuş!")
+            telegram_bildirim_gonder("⚠️ itemsatis.com oturum süresi doldu! Cookie'yi yenilemeniz gerekiyor.")
+            return
 
-    if not mesaj_satirlari:
-        print("Mesaj öğesi bulunamadı, sayfa yapısı değişmiş olabilir.")
-        return
+        mesaj_satirlari = soup.select(".conversation-item, .message-row, .msg-item, .chat-item, li.media")
 
-    for satir in mesaj_satirlari:
-        # Okunmamış mesajları tespit et
-        okunmamis = satir.select_one(".unread, .badge, .new-message")
-        mesaj_id = satir.get("data-id") or satir.get("id") or str(satir)[:100]
+        if not mesaj_satirlari:
+            mesaj_satirlari = soup.select("li, .list-group-item")
 
-        if mesaj_id not in seen_messages:
-            seen_messages.add(mesaj_id)
+        print(f"{len(mesaj_satirlari)} mesaj öğesi bulundu.")
 
-            gonderen = satir.select_one(".sender, .username, .from")
-            gonderen_adi = gonderen.text.strip() if gonderen else "Bilinmiyor"
+        for satir in mesaj_satirlari:
+            mesaj_id = satir.get("data-id") or satir.get("id") or str(hash(str(satir)))
 
-            on_izleme = satir.select_one(".preview, .message-preview, .last-message")
-            mesaj_metni = on_izleme.text.strip() if on_izleme else "Mesaj içeriği yok"
+            if mesaj_id not in seen_messages:
+                seen_messages.add(mesaj_id)
 
-            bildirim = (
-                f"📩 <b>Yeni Mesaj!</b>\n"
-                f"👤 Gönderen: {gonderen_adi}\n"
-                f"💬 Mesaj: {mesaj_metni}\n"
-                f"🔗 <a href='https://www.itemsatis.com/mesajlar'>Mesajları Görüntüle</a>"
-            )
-            telegram_bildirim_gonder(bildirim)
+                gonderen = satir.select_one(".username, .name, strong, b, .sender")
+                gonderen_adi = gonderen.text.strip() if gonderen else "Bilinmiyor"
+
+                on_izleme = satir.select_one(".preview, .message-preview, p, .last-msg, small")
+                mesaj_metni = on_izleme.text.strip()[:100] if on_izleme else "Mesaj içeriği yok"
+
+                if gonderen_adi and gonderen_adi != "Bilinmiyor":
+                    bildirim = (
+                        f"📩 <b>Yeni Mesaj!</b>\n"
+                        f"👤 Gönderen: {gonderen_adi}\n"
+                        f"💬 {mesaj_metni}\n"
+                        f"🔗 <a href='https://www.itemsatis.com/mesajlar'>Mesajları Görüntüle</a>"
+                    )
+                    telegram_bildirim_gonder(bildirim)
+
+    except Exception as e:
+        print(f"Hata: {e}")
 
 def main():
-    session = requests.Session()
     print("Bot başlatılıyor...")
     telegram_bildirim_gonder("✅ Mesaj bildirim botu başlatıldı! Yeni mesajları takip ediyorum.")
 
-    giris_basarili = itemsatis_giris_yap(session)
-    if not giris_basarili:
-        telegram_bildirim_gonder("❌ itemsatis.com'a giriş yapılamadı! Kullanıcı adı/şifreyi kontrol edin.")
-        return
+    print("Mevcut mesajlar yükleniyor...")
+    mesajlari_kontrol_et()
+    print("Hazır! Yeni mesajlar bekleniyor...")
 
     while True:
-        try:
-            print("Mesajlar kontrol ediliyor...")
-            mesajlari_kontrol_et(session)
-        except Exception as e:
-            print(f"Hata: {e}")
-            # Oturum düşmüş olabilir, tekrar giriş yap
-            itemsatis_giris_yap(session)
         time.sleep(CHECK_INTERVAL)
+        print("Mesajlar kontrol ediliyor...")
+        mesajlari_kontrol_et()
 
 if __name__ == "__main__":
     main()
