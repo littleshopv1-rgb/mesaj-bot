@@ -3,6 +3,7 @@ import time
 import requests
 import socketio
 import re
+from urllib.parse import quote
 
 # Ayarlar
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
@@ -10,7 +11,6 @@ TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 TEMP_TOKEN = os.environ.get("TEMP_TOKEN")
 SOCKET_URL = "https://chat.itemsatis.com"
 
-# Daha önce bildirim gönderilen mesaj ID'lerini takip et
 seen_message_ids = set()
 
 def send_telegram(message):
@@ -69,13 +69,6 @@ def start_socket():
         except Exception as e:
             print(f"receiveMessageList hatası: {e}")
 
-    @sio.on("getMyChatByIdResult")
-    def on_chat_result(data):
-        try:
-            print(f"getMyChatByIdResult: {str(data)[:300]}")
-        except Exception as e:
-            print(f"getMyChatByIdResult hatası: {e}")
-
     @sio.on("*")
     def catch_all(event, data):
         skip = ["ping", "pong", "connect", "disconnect"]
@@ -84,10 +77,13 @@ def start_socket():
 
     while True:
         try:
+            # userData'yı JSON string olarak encode et ve query param olarak gönder
+            encoded_token = quote(f'"{TEMP_TOKEN}"')
+            connect_url = f"{SOCKET_URL}?userData={encoded_token}"
+            
             print(f"Bağlanılıyor: {SOCKET_URL}")
             sio.connect(
-                SOCKET_URL,
-                auth={"userData": TEMP_TOKEN},
+                connect_url,
                 transports=["websocket"],
                 wait_timeout=15
             )
