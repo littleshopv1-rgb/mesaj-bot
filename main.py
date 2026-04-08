@@ -4,11 +4,11 @@ import requests
 import socketio
 import re
 import json
+from urllib.parse import quote
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 TEMP_TOKEN = os.environ.get("TEMP_TOKEN")
-SOCKET_URL = "https://chat.itemsatis.com"
 
 seen_message_ids = set()
 
@@ -73,14 +73,16 @@ def start_socket():
 
     while True:
         try:
-            print("Bağlanılıyor...")
-            # userData'yı JSON string olarak gönder (tarayıcıda %22token%22 şeklinde)
+            # userData'yı JSON string olarak URL'e ekle (tarayıcıyla aynı yöntem)
+            token_json = json.dumps(TEMP_TOKEN)  # "TOKEN" şeklinde tırnaklı
+            encoded_token = quote(token_json, safe='')
+            connect_url = f"https://chat.itemsatis.com?userData={encoded_token}"
+            
+            print(f"Bağlanılıyor...")
             sio.connect(
-                SOCKET_URL,
+                connect_url,
                 transports=["websocket"],
-                wait_timeout=15,
-                socketio_path="socket.io",
-                query={"userData": json.dumps(TEMP_TOKEN)}
+                wait_timeout=15
             )
             sio.wait()
         except Exception as e:
