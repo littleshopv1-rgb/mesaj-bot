@@ -1,93 +1,99 @@
-import requests
-import time
 import os
-from bs4 import BeautifulSoup
+import time
+import requests
+import socketio
 
-PHPSESSID = os.environ.get("PHPSESSID")
+# Ayarlar
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
-CHECK_INTERVAL = 60
+TEMP_TOKEN = os.environ.get("TEMP_TOKEN")
+SOCKET_URL = "https://chat.itemsatis.com"
 
-seen_ids = set()
-
-def telegram_bildirim_gonder(mesaj):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    data = {
-        "chat_id": TELEGRAM_CHAT_ID,
-        "text": mesaj,
-        "parse_mode": "HTML"
-    }
+def send_telegram(message):
     try:
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+        data = {"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "HTML"}
         requests.post(url, data=data, timeout=10)
-        print("Telegram bildirimi gönderildi.")
+        print("Telegram mesajı gönderildi.")
     except Exception as e:
         print(f"Telegram hatası: {e}")
 
-def mesajlari_kontrol_et(ilk_yukleme=False):
-    global seen_ids
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Cookie": f"PHPSESSID={PHPSESSID}"
-    }
-    try:
-        r = requests.get("https://www.itemsatis.com/mesajlarim.html", headers=headers, timeout=15)
-        
-        if "giris" in r.url or "login" in r.url:
-            print("Oturum süresi dolmuş!")
-            telegram_bildirim_gonder("⚠️ itemsatis.com oturum süresi doldu! Cookie'yi yenilemeniz gerekiyor.")
-            return
+def start_socket():
+    sio = socketio.Client(reconnection=True, reconnection_attempts=0, reconnection_delay=5)
 
-        soup = BeautifulSoup(r.text, "html.parser")
-        
-        # data-id özelliği olan tüm li elementlerini bul
-        konusmalar = soup.find_all("li", attrs={"data-id": True})
-        print(f"{len(konusmalar)} konuşma bulundu.")
+    @sio.event
+    def connect():
+        print("Socket.io bağlantısı kuruldu!")
+        send_telegram("✅ <b>Mesaj botu başlatıldı!</b>\nYeni mesajları takip ediyorum.")
+        # Kimlik doğrulama
+        sio.emit("authenticate", {"token": TEMP_TOKEN})
 
-        for konusma in konusmalar:
-            data_id = konusma.get("data-id")
-            username = konusma.get("data-username", "Bilinmiyor")
-            classes = konusma.get("class", [])
+    @sio.event
+    def disconnect():
+        print("Bağlantı kesildi, yeniden bağlanılıyor...")
+
+    @sio.event
+    def connect_error(data):
+        print(f"Bağlantı hatası: {data}")
+
+    # Yeni mesaj geldiğinde
+    @sio.on("newMessage")
+    def on_new_message(data):
+        try:
+            print(f"Yeni mesaj alındı: {data}")
+            sender = data.get("senderName") or data.get("sender") or "Bilinmeyen"
+            message = data.get("message") or data.get("text") or data.get("content") or "..."
             
-            # İlk yüklemede sadece ID'leri kaydet, bildirim gönderme
-            if ilk_yukleme:
-                seen_ids.add(data_id)
-                continue
+            text = (
+                f"💬 <b>Yeni Mesaj!</b>\n"
+                f"👤 Gönderen: <b>{sender}</b>\n"
+                f"📝 Mesaj: {message}"
+            )
+            send_telegram(text)
+        except Exception as e:
+            print(f"Mesaj işleme hatası: {e}")
+            send_telegram(f"💬 Yeni mesaj geldi! (detay alınamadı)\nVeri: {str(data)[:200]}")
 
-            # Yeni mesaj mı?
-            if data_id not in seen_ids:
-                seen_ids.add(data_id)
-                bildirim = (
-                    f"📩 <b>Yeni Mesaj!</b>\n"
-                    f"👤 Gönderen: {username}\n"
-                    f"🔗 <a href='https://www.itemsatis.com/mesajlarim.html'>Mesajları Görüntüle</a>"
-                )
-                telegram_bildirim_gonder(bildirim)
-                print(f"Yeni mesaj: {username}")
-            
-            # Okunmamış mesaj var mı? (notSeenClass)
-            elif "notSeenClass" in classes and data_id not in seen_ids:
-                bildirim = (
-                    f"📩 <b>Okunmamış Mesaj!</b>\n"
-                    f"👤 Gönderen: {username}\n"
-                    f"🔗 <a href='https://www.itemsatis.com/mesajlarim.html'>Mesajları Görüntüle</a>"
-                )
-                telegram_bildirim_gonder(bildirim)
+    # Diğer olası event isimleri
+    @sio.on("message")
+    def on_message(data):
+        on_new_message(data)
 
-    except Exception as e:
-        print(f"Hata: {e}")
+    @sio.on("chat")
+    def on_chat(data):
+        on_new_message(data)
 
-def main():
-    print("Bot başlatılıyor...")
-    telegram_bildirim_gonder("✅ Mesaj bildirim botu başlatıldı! Yeni mesajları takip ediyorum.")
+    @sio.on("newChat")
+    def on_new_chat(data):
+        on_new_message(data)
 
-    print("Mevcut mesajlar yükleniyor...")
-    mesajlari_kontrol_et(ilk_yukleme=True)
-    print(f"Hazır! {len(seen_ids)} mevcut konuşma kaydedildi. Yeni mesajlar bekleniyor...")
+    @sio.on("*")
+    def catch_all(event, data):
+        # Tüm eventleri logla - hangi event isminin geldiğini görmek için
+        if event not in ["ping", "pong", "connect", "disconnect"]:
+            print(f"Event: {event} | Data: {str(data)[:300]}")
 
     while True:
-        time.sleep(CHECK_INTERVAL)
-        print("Mesajlar kontrol ediliyor...")
-        mesajlari_kontrol_et(ilk_yukleme=False)
+        try:
+            print(f"Socket.io sunucusuna bağlanılıyor: {SOCKET_URL}")
+            sio.connect(
+                SOCKET_URL,
+                headers={"Authorization": f"Bearer {TEMP_TOKEN}"},
+                transports=["websocket"],
+                wait_timeout=10
+            )
+            sio.wait()
+        except Exception as e:
+            print(f"Bağlantı hatası: {e}")
+            print("5 saniye sonra tekrar deneniyor...")
+            time.sleep(5)
 
 if __name__ == "__main__":
-    main()
+    print("Bot başlatılıyor...")
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID or not TEMP_TOKEN:
+        print("HATA: Gerekli environment variables eksik!")
+        print(f"TELEGRAM_TOKEN: {'✓' if TELEGRAM_TOKEN else '✗'}")
+        print(f"TELEGRAM_CHAT_ID: {'✓' if TELEGRAM_CHAT_ID else '✗'}")
+        print(f"TEMP_TOKEN: {'✓' if TEMP_TOKEN else '✗'}")
+    else:
+        start_socket()
